@@ -43,6 +43,10 @@ func runTokenCommand(ctx context.Context, command config.TokenCommand, interacti
 	if interactive {
 		cmd.Stdin = os.Stdin
 	}
+	configureProcess(cmd)
+	// After cancellation, do not wait forever for descendants that still
+	// hold the output pipe.
+	cmd.WaitDelay = 2 * time.Second
 
 	// The output is a credential: it is never logged and never part of an error.
 	out, err := cmd.Output()
