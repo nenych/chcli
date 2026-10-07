@@ -31,6 +31,11 @@ type Credentials struct {
 	Identity string
 	// Expiry is when Token stops being valid; zero if unknown or not applicable.
 	Expiry time.Time
+	// Issuer and Audience are the corresponding claims of a JWT, for
+	// diagnostics: a server rejects a token whose audience is not the one it
+	// expects. Empty for opaque tokens.
+	Issuer   string
+	Audience string
 }
 
 // UsesToken reports whether these are token credentials.
@@ -255,6 +260,17 @@ func (p *JWTProvider) credentials(token string) (creds *Credentials, expired boo
 	if claims, err := parseJWTClaims(token); err == nil {
 		creds.Identity = claimString(claims, "email", "preferred_username", "sub")
 		creds.Expiry = claimTime(claims, "exp")
+		creds.Issuer = claimString(claims, "iss")
+		creds.Audience = claimString(claims, "aud")
+		if list, ok := claims["aud"].([]any); ok {
+			parts := make([]string, 0, len(list))
+			for _, a := range list {
+				if s, ok := a.(string); ok {
+					parts = append(parts, s)
+				}
+			}
+			creds.Audience = strings.Join(parts, ", ")
+		}
 	}
 	return creds, !creds.Expiry.IsZero() && !p.clock().Before(creds.Expiry)
 }

@@ -111,13 +111,19 @@ func TestCacheKey(t *testing.T) {
 func TestJWTProvider(t *testing.T) {
 	now := time.Now()
 	exp := now.Add(time.Hour).Truncate(time.Second)
-	p := &JWTProvider{Token: unsignedJWT(t, map[string]any{"sub": "svc", "preferred_username": "jdoe", "exp": exp.Unix()})}
+	p := &JWTProvider{Token: unsignedJWT(t, map[string]any{"sub": "svc", "preferred_username": "jdoe", "exp": exp.Unix(),
+		"iss": "https://accounts.google.com", "aud": "my-client-id"})}
 	creds, err := p.Authenticate(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
-	if creds.Identity != "jdoe" || !creds.Expiry.Equal(exp) || creds.Token != p.Token {
+	if creds.Identity != "jdoe" || !creds.Expiry.Equal(exp) || creds.Token != p.Token ||
+		creds.Issuer != "https://accounts.google.com" || creds.Audience != "my-client-id" {
 		t.Errorf("creds = %+v", creds)
+	}
+	multi := &JWTProvider{Token: unsignedJWT(t, map[string]any{"aud": []string{"a", "b"}, "exp": exp.Unix()})}
+	if creds, err := multi.Authenticate(context.Background()); err != nil || creds.Audience != "a, b" {
+		t.Errorf("multiple audiences: %+v, %v", creds, err)
 	}
 
 	expired := &JWTProvider{Token: unsignedJWT(t, map[string]any{"sub": "svc", "exp": now.Add(-time.Minute).Unix()})}

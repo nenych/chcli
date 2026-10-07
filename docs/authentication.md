@@ -56,7 +56,9 @@ connections:
     secure: true
     auth:
       type: jwt
-      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=1234567890-abc.apps.googleusercontent.com --include-email
+      # --audiences must be the OAuth client ID the server was configured with
+      # (its expected_audience), and --include-email is what puts the e-mail claim in.
+      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=<your client ID>.apps.googleusercontent.com --include-email
 ```
 
 On the command line: `--jwt-token-command "..."` or `CHCLI_JWT_TOKEN_COMMAND`;

@@ -177,6 +177,14 @@ func (a *app) staticTokenStatus(cmd *cobra.Command, resolved *config.Resolved, l
 	if creds.Identity != "" {
 		line("User", creds.Identity)
 	}
+	// The claims a server checks: a mismatch here is the usual reason for
+	// "token is invalid" errors.
+	if creds.Issuer != "" {
+		line("Issuer", creds.Issuer)
+	}
+	if creds.Audience != "" {
+		line("Audience", creds.Audience)
+	}
 	line("Token status", "valid")
 	if !creds.Expiry.IsZero() {
 		line("Expires in", repl.FormatDuration(time.Until(creds.Expiry)))

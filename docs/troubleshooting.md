@@ -26,6 +26,7 @@ $ chcli doctor --profile production
 | `auth type "jwt" would send the token to ... without TLS` | A token combined with a plaintext port on a remote host. Use the TLS port (`--secure`), or `--secure=false` if you really mean it. |
 | `--jwt-token does not apply to "password" authentication` | A credential flag that the profile's authentication type would ignore. Add the matching `--auth`. |
 | `this statement only has an effect within a server session` | `SET ROLE` or a temporary table over HTTP; use `--protocol native`. |
+| `Code: 516. Failed to get user info by access token ... Unauthorized` | An Antalya server tried the token as a Google *access* token because no JWT processor accepted it. With an ID token that means its `aud` is not the client ID the server expects (`chcli auth status` shows the token's issuer and audience) or its signature/issuer did not check out. |
 | `Code: 516. Token is invalid` | The server rejected the token: wrong issuer or audience, an expired token, or the wrong kind of token. Compare the server's token processor with `token_type` (see [Altinity Antalya](authentication.md#altinity-antalya)). |
 | `OAuth credentials for profile ... are not available` | A scripted run without a cached session: run `chcli auth login --profile ...` once. |
 | The browser shows `redirect_uri_mismatch` | Register the redirect URI with the provider and set `redirect_uri` to the same value. |
