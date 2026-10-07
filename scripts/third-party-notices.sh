@@ -7,6 +7,9 @@
 #   scripts/third-party-notices.sh --check  # fail if the file is out of date (CI)
 set -eu
 
+# Byte order for sort, so the file comes out the same on every platform.
+export LC_ALL=C
+
 cd "$(dirname "$0")/.."
 out=THIRD_PARTY_NOTICES.md
 tmp=$(mktemp)

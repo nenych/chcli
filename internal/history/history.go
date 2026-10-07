@@ -26,25 +26,8 @@ type History struct {
 // is compacted.
 func Open(path string, max int) (*History, error) {
 	h := &History{path: path, max: max}
-	f, err := os.Open(path)
-	if errors.Is(err, fs.ErrNotExist) {
-		return h, nil
-	}
+	total, err := h.read()
 	if err != nil {
-		return nil, err
-	}
-	defer f.Close()
-
-	scanner := bufio.NewScanner(f)
-	scanner.Buffer(make([]byte, 0, 64<<10), 16<<20)
-	total := 0
-	for scanner.Scan() {
-		if line := scanner.Text(); line != "" {
-			h.entries = append(h.entries, unescape(line))
-			total++
-		}
-	}
-	if err := scanner.Err(); err != nil {
 		return nil, err
 	}
 	if len(h.entries) > max {
@@ -56,6 +39,30 @@ func Open(path string, max int) (*History, error) {
 		}
 	}
 	return h, nil
+}
+
+// read loads the file into h.entries and returns the number of lines it
+// held. The file is closed before returning: on Windows an open file cannot
+// be replaced by rewrite.
+func (h *History) read() (total int, err error) {
+	f, err := os.Open(h.path)
+	if errors.Is(err, fs.ErrNotExist) {
+		return 0, nil
+	}
+	if err != nil {
+		return 0, err
+	}
+	defer f.Close()
+
+	scanner := bufio.NewScanner(f)
+	scanner.Buffer(make([]byte, 0, 64<<10), 16<<20)
+	for scanner.Scan() {
+		if line := scanner.Text(); line != "" {
+			h.entries = append(h.entries, unescape(line))
+			total++
+		}
+	}
+	return total, scanner.Err()
 }
 
 // Entries returns the entries, oldest first.
