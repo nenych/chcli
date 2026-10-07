@@ -8,11 +8,14 @@ All notable changes to chcli are documented here. The format follows
 
 ### Added
 
-- `auth.token_command` (`--jwt-token-command`, `CHCLI_JWT_TOKEN_COMMAND`): an
-  external command that prints the bearer token, like kubeconfig's exec
-  credential plugins. It is run again whenever the token it printed is about
-  to expire, so long sessions keep working. Accepts a shell string or a list
-  of program and arguments; plain or JSON output.
+- Secrets from commands, like kubeconfig's exec credential plugins: every
+  secret setting has a `_command` companion in the profile (`password_command`,
+  `token_command`, `client_secret_command`), a `-command` flag
+  (`--password-command`, `--jwt-token-command`, `--oauth-client-secret-command`)
+  and a `_COMMAND` environment variable. A command is a shell string or a
+  list of program and arguments; its output is read as plain text or JSON.
+  A bearer token is fetched again whenever the one in use is about to
+  expire, so long sessions keep working.
 
 ## [0.1.0] - 2026-10-07
 

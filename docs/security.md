@@ -33,8 +33,11 @@
   redacted in `config show`, in `--debug` logs and in error messages. `--debug`
   is safe to paste into a bug report.
 - **Secrets on the command line** are visible to other users of the machine
-  through the process list. Use `--ask-password` or the `CHCLI_*` environment
-  variables.
+  through the process list. Use `--ask-password`, the `CHCLI_*` environment
+  variables, or a `*_command` that reads the secret from a keychain or
+  password manager (see [Secrets from commands](configuration.md#secrets-from-commands)).
+  Commands run with your privileges from your configuration file; keep that
+  file writable by you alone.
 - **Configuration file.** Storing secrets in it is supported but discouraged;
   `chcli` warns when a configuration file containing secrets is readable by
   other users.

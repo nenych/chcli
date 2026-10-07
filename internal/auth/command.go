@@ -11,23 +11,60 @@ import (
 	"os/exec"
 	"runtime"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nenych/chcli/internal/config"
 )
 
-// tokenCommandTimeout bounds a token command, which may have to talk to an
+// commandTimeout bounds a secret command, which may have to talk to an
 // identity provider or even ask the user to log in.
-const tokenCommandTimeout = 2 * time.Minute
+const commandTimeout = 2 * time.Minute
 
-// runTokenCommand runs the configured command and returns the token it
-// printed. The token is the last non-empty line of standard output, or, when
-// the output is a JSON object, its "token", "access_token", "id_token" or
-// "status.token" (kubeconfig ExecCredential) field. Standard error goes to
-// errOut; with interactive set, the command also gets the terminal as its
-// standard input.
-func runTokenCommand(ctx context.Context, command config.TokenCommand, interactive bool, errOut io.Writer) (string, error) {
-	ctx, cancel := context.WithTimeout(ctx, tokenCommandTimeout)
+// SecretSource yields a secret that is either given directly or printed by a
+// command. A command runs at most once per process; its result is cached.
+// (Tokens, which expire, are handled by JWTProvider instead.)
+type SecretSource struct {
+	what    string // for messages: "password", "client secret"
+	value   string
+	command config.Command
+	errOut  io.Writer
+
+	mu     sync.Mutex
+	loaded bool
+}
+
+// NewSecretSource builds a source from a direct value or a command (at most
+// one of them is set; the configuration guarantees that).
+func NewSecretSource(what, value string, command config.Command, errOut io.Writer) *SecretSource {
+	return &SecretSource{what: what, value: value, command: command, errOut: errOut}
+}
+
+// Get returns the secret, running the command the first time. interactive
+// lets the command use the terminal.
+func (s *SecretSource) Get(ctx context.Context, interactive bool) (string, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if s.loaded || !s.command.IsSet() {
+		return s.value, nil
+	}
+	value, err := runSecretCommand(ctx, s.command, interactive, s.errOut)
+	if err != nil {
+		return "", err
+	}
+	s.value, s.loaded = value, true
+	return value, nil
+}
+
+// runSecretCommand runs a command and returns the secret it printed: the
+// last non-empty line of standard output, or, when the output is a JSON
+// object, its "token", "access_token", "id_token", "status.token" (kubeconfig
+// ExecCredential), "password", "secret", "client_secret" or "value" field.
+// Standard error goes to errOut; with interactive set, the command also gets
+// the terminal as its standard input. The output is never logged and never
+// part of an error.
+func runSecretCommand(ctx context.Context, command config.Command, interactive bool, errOut io.Writer) (string, error) {
+	ctx, cancel := context.WithTimeout(ctx, commandTimeout)
 	defer cancel()
 
 	var cmd *exec.Cmd
@@ -48,46 +85,49 @@ func runTokenCommand(ctx context.Context, command config.TokenCommand, interacti
 	// hold the output pipe.
 	cmd.WaitDelay = 2 * time.Second
 
-	// The output is a credential: it is never logged and never part of an error.
 	out, err := cmd.Output()
 	if err != nil {
 		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return "", fmt.Errorf("token command %q did not finish within %s", command, tokenCommandTimeout)
+			return "", fmt.Errorf("command %q did not finish within %s", command, commandTimeout)
 		}
 		var exitErr *exec.ExitError
 		if errors.As(err, &exitErr) {
-			return "", fmt.Errorf("token command %q failed with %s", command, exitErr.ProcessState)
+			return "", fmt.Errorf("command %q failed with %s", command, exitErr.ProcessState)
 		}
-		return "", fmt.Errorf("token command %q: %w", command, err)
+		return "", fmt.Errorf("command %q: %w", command, err)
 	}
-	return parseTokenOutput(out)
+	return parseSecretOutput(out)
 }
 
-func parseTokenOutput(out []byte) (string, error) {
+func parseSecretOutput(out []byte) (string, error) {
 	text := strings.TrimSpace(string(out))
 	if strings.HasPrefix(text, "{") {
 		var doc struct {
-			Token       string `json:"token"`
-			AccessToken string `json:"access_token"`
-			IDToken     string `json:"id_token"`
-			Status      struct {
+			Token        string `json:"token"`
+			AccessToken  string `json:"access_token"`
+			IDToken      string `json:"id_token"`
+			Password     string `json:"password"`
+			Secret       string `json:"secret"`
+			ClientSecret string `json:"client_secret"`
+			Value        string `json:"value"`
+			Status       struct {
 				Token string `json:"token"`
 			} `json:"status"`
 		}
 		if err := json.Unmarshal([]byte(text), &doc); err != nil {
-			return "", errors.New("the token command printed JSON that could not be parsed")
+			return "", errors.New("the command printed JSON that could not be parsed")
 		}
-		for _, candidate := range []string{doc.Token, doc.AccessToken, doc.IDToken, doc.Status.Token} {
+		for _, candidate := range []string{doc.Token, doc.AccessToken, doc.IDToken, doc.Status.Token, doc.Password, doc.Secret, doc.ClientSecret, doc.Value} {
 			if candidate != "" {
 				return candidate, nil
 			}
 		}
-		return "", errors.New(`the token command printed JSON without a "token", "access_token", "id_token" or "status.token" field`)
+		return "", errors.New(`the command printed JSON without a "token", "access_token", "id_token", "status.token", "password", "secret", "client_secret" or "value" field`)
 	}
 	lines := bytes.Split([]byte(text), []byte("\n"))
 	last := strings.TrimSpace(string(lines[len(lines)-1]))
 	if last == "" {
-		return "", errors.New("the token command printed nothing")
+		return "", errors.New("the command printed nothing")
 	}
 	return last, nil
 }

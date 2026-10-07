@@ -13,12 +13,12 @@ import (
 	"github.com/nenych/chcli/internal/config"
 )
 
-func shellCommand(t *testing.T, script string) config.TokenCommand {
+func shellCommand(t *testing.T, script string) config.Command {
 	t.Helper()
 	if runtime.GOOS == "windows" {
 		t.Skip("the test commands are POSIX shell")
 	}
-	return config.TokenCommand{Shell: script}
+	return config.Command{Shell: script}
 }
 
 func TestTokenCommand(t *testing.T) {
@@ -95,7 +95,7 @@ func TestTokenCommandOutputForms(t *testing.T) {
 	}
 	// The list form runs the program directly, without a shell.
 	if runtime.GOOS != "windows" {
-		p := &JWTProvider{Command: config.TokenCommand{Argv: []string{"printf", "%s", "argv-token"}}}
+		p := &JWTProvider{Command: config.Command{Argv: []string{"printf", "%s", "argv-token"}}}
 		if creds, err := p.Authenticate(ctx); err != nil || creds.Token != "argv-token" {
 			t.Errorf("argv form: %v, %v", creds, err)
 		}
@@ -153,7 +153,7 @@ func TestTokenCommandFailures(t *testing.T) {
 }
 
 func TestNewProviderWiresTokenCommand(t *testing.T) {
-	r := resolved(t, "svc", config.Auth{Type: config.AuthJWT, TokenCommand: config.TokenCommand{Argv: []string{"printf", "%s", "x"}}})
+	r := resolved(t, "svc", config.Auth{Type: config.AuthJWT, TokenCommand: config.Command{Argv: []string{"printf", "%s", "x"}}})
 	p, err := NewProvider(r, Options{Interactive: true})
 	if err != nil {
 		t.Fatal(err)
@@ -161,5 +161,83 @@ func TestNewProviderWiresTokenCommand(t *testing.T) {
 	jp, ok := p.(*JWTProvider)
 	if !ok || !jp.Command.IsSet() || !jp.Interactive {
 		t.Errorf("provider = %#v", p)
+	}
+}
+
+// A password or client secret command runs once per process and its result
+// is shared with the non-interactive view; the secret itself never appears
+// in output.
+func TestPasswordFromCommand(t *testing.T) {
+	counter := filepath.Join(t.TempDir(), "runs")
+	script := "n=$(cat " + counter + " 2>/dev/null || echo 0); echo $((n+1)) > " + counter + "; echo hunter2-from-command"
+	runs := func() string {
+		b, _ := os.ReadFile(counter)
+		return strings.TrimSpace(string(b))
+	}
+	r := resolved(t, "", config.Auth{Type: config.AuthPassword, Username: "u", PasswordCommand: shellCommand(t, script)})
+	var stderr bytes.Buffer
+	p, err := NewProvider(r, Options{Interactive: true, Out: &stderr})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for i := range 3 {
+		creds, err := p.Authenticate(context.Background())
+		if err != nil || creds.Password != "hunter2-from-command" || creds.Username != "u" {
+			t.Fatalf("call %d: %+v, %v", i, creds, err)
+		}
+	}
+	if c, err := NonInteractive(p).Authenticate(context.Background()); err != nil || c.Password != "hunter2-from-command" {
+		t.Errorf("non-interactive view: %+v, %v", c, err)
+	}
+	if runs() != "1" {
+		t.Errorf("the command ran %s times, want once", runs())
+	}
+	if strings.Contains(stderr.String(), "hunter2") {
+		t.Error("the password reached stderr")
+	}
+
+	// Without a command the given value is used as is.
+	plain, _ := NewProvider(resolved(t, "", config.Auth{Type: config.AuthPassword, Username: "u", Password: "pw"}), Options{})
+	if creds, err := plain.Authenticate(context.Background()); err != nil || creds.Password != "pw" {
+		t.Errorf("plain password: %+v, %v", creds, err)
+	}
+}
+
+func TestClientSecretFromCommand(t *testing.T) {
+	h := newHarness(t)
+	h.idp.clientSecret = "client-secret-value"
+	counter := filepath.Join(t.TempDir(), "runs")
+	script := "n=$(cat " + counter + " 2>/dev/null || echo 0); echo $((n+1)) > " + counter + "; echo client-secret-value"
+	h.cfg.ClientSecret = NewSecretSource("client secret", "", shellCommand(t, script), h.out)
+
+	// Login exchanges the code with the secret the command printed...
+	creds, err := h.provider(true).Authenticate(testContext(t))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if creds.Identity != "user@example.com" {
+		t.Errorf("identity = %q", creds.Identity)
+	}
+	// ...and a refresh in a new process (a fresh source) runs it again, once.
+	h.clock.Advance(2 * time.Hour)
+	h.cfg.ClientSecret = NewSecretSource("client secret", "", shellCommand(t, script), h.out)
+	if _, err := h.provider(false).Authenticate(testContext(t)); err != nil {
+		t.Fatalf("refresh with the command-provided secret: %v", err)
+	}
+	b, _ := os.ReadFile(counter)
+	if strings.TrimSpace(string(b)) != "2" {
+		t.Errorf("the command ran %s times across two processes, want 2", strings.TrimSpace(string(b)))
+	}
+	if strings.Contains(h.out.String(), "client-secret-value") {
+		t.Error("the client secret reached the user-facing output")
+	}
+
+	// A wrong secret from the command is a login failure, not a crash.
+	h.cfg.ClientSecret = NewSecretSource("client secret", "", shellCommand(t, "echo wrong"), h.out)
+	if err := h.provider(true).Logout(); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := h.provider(true).Authenticate(testContext(t)); err == nil || !strings.Contains(err.Error(), "invalid_client") {
+		t.Errorf("wrong secret: %v", err)
 	}
 }

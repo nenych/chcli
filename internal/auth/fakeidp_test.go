@@ -38,6 +38,7 @@ type fakeIDP struct {
 	requests      map[string][]url.Values // endpoint path -> parameters of each request
 
 	// Behaviour switches.
+	clientSecret    string // when set, /token requires this client_secret
 	idTokenAudience string // audience of issued ID tokens; defaults to clientID
 	authError       string // returned from /authorize instead of a code
 	wrongNonce      bool
@@ -150,6 +151,10 @@ func (i *fakeIDP) token(w http.ResponseWriter, r *http.Request) {
 	}
 	i.mu.Lock()
 	defer i.mu.Unlock()
+	if i.clientSecret != "" && form.Get("client_secret") != i.clientSecret {
+		writeJSON(w, http.StatusUnauthorized, map[string]any{"error": "invalid_client", "error_description": "bad client secret"})
+		return
+	}
 
 	nonce := ""
 	switch form.Get("grant_type") {

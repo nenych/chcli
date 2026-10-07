@@ -117,6 +117,9 @@ func (a *app) authStatus(cmd *cobra.Command) error {
 		switch resolved.Auth.Type {
 		case config.AuthPassword:
 			line("User", resolved.Auth.Username)
+			if resolved.Auth.PasswordCommand.IsSet() {
+				line("Password source", "command: "+resolved.Auth.PasswordCommand.String())
+			}
 		case config.AuthJWT:
 			return a.staticTokenStatus(cmd, resolved, line)
 		}

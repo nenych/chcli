@@ -181,13 +181,15 @@ Run without a query to start the interactive shell, or pass statements with
 	pf.String(config.KeyCACert, "", "PEM file with the CA certificate(s) to trust")
 	pf.String(config.KeyAuth, "", "authentication type: password, jwt, oidc or google")
 	pf.StringP(config.KeyUser, "u", "", `user name for password authentication (default "default")`)
-	pf.String(config.KeyPassword, "", "password (prefer CHCLI_PASSWORD or --ask-password)")
+	pf.String(config.KeyPassword, "", "password (prefer CHCLI_PASSWORD, --ask-password or --password-command)")
+	pf.String(config.CommandKey(config.KeyPassword), "", "shell command that prints the password")
 	pf.BoolVar(&a.askPassword, "ask-password", false, "prompt for the password")
-	pf.String(config.KeyJWTToken, "", "JWT / bearer token (prefer CHCLI_JWT_TOKEN)")
-	pf.String(config.KeyJWTTokenCommand, "", "shell command that prints the JWT / bearer token, run again when it expires")
+	pf.String(config.KeyJWTToken, "", "JWT / bearer token (prefer CHCLI_JWT_TOKEN or --jwt-token-command)")
+	pf.String(config.CommandKey(config.KeyJWTToken), "", "shell command that prints the JWT / bearer token, run again when it expires")
 	pf.Bool(config.KeyGoogleOAuth, false, "shortcut for --auth google")
 	pf.String(config.KeyClientID, "", "OAuth client ID")
-	pf.String(config.KeyClientSecret, "", "OAuth client secret (prefer CHCLI_OAUTH_CLIENT_SECRET)")
+	pf.String(config.KeyClientSecret, "", "OAuth client secret (prefer CHCLI_OAUTH_CLIENT_SECRET or --oauth-client-secret-command)")
+	pf.String(config.CommandKey(config.KeyClientSecret), "", "shell command that prints the OAuth client secret")
 	pf.String(config.KeyIssuer, "", "OIDC issuer URL, used for endpoint discovery")
 	pf.String(config.KeyAuthEndpoint, "", "OAuth authorization endpoint (overrides discovery)")
 	pf.String(config.KeyTokenEndpoint, "", "OAuth token endpoint (overrides discovery)")
@@ -342,5 +344,6 @@ func (a *app) promptPassword(resolved *config.Resolved) error {
 		return err
 	}
 	resolved.Auth.Password = config.Secret(pw)
+	resolved.Auth.PasswordCommand = config.Command{} // the prompt replaces a configured command
 	return nil
 }

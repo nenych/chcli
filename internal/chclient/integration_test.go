@@ -53,7 +53,7 @@ func provider(password string) auth.Provider {
 	if user == "" {
 		user = "default"
 	}
-	return &auth.PasswordProvider{Username: user, Password: password}
+	return &auth.PasswordProvider{Username: user, Password: auth.NewSecretSource("password", password, config.Command{}, nil)}
 }
 
 func connect(t *testing.T, opts chclient.Options) *chclient.Client {

@@ -101,17 +101,18 @@ type Auth struct {
 	Type string `yaml:"type"`
 
 	// Password authentication.
-	Username string `yaml:"username,omitempty"`
-	Password Secret `yaml:"password,omitempty"`
+	Username        string  `yaml:"username,omitempty"`
+	Password        Secret  `yaml:"password,omitempty"`
+	PasswordCommand Command `yaml:"password_command,omitempty"`
 
-	// Static JWT / bearer token authentication: either the token itself or
-	// a command that prints one.
-	Token        Secret       `yaml:"token,omitempty"`
-	TokenCommand TokenCommand `yaml:"token_command,omitempty"`
+	// Static JWT / bearer token authentication.
+	Token        Secret  `yaml:"token,omitempty"`
+	TokenCommand Command `yaml:"token_command,omitempty"`
 
 	// OAuth 2.0 / OpenID Connect (types "oidc" and "google").
 	ClientID              string   `yaml:"client_id,omitempty"`
 	ClientSecret          Secret   `yaml:"client_secret,omitempty"`
+	ClientSecretCommand   Command  `yaml:"client_secret_command,omitempty"`
 	Issuer                string   `yaml:"issuer,omitempty"`
 	AuthorizationEndpoint string   `yaml:"authorization_endpoint,omitempty"`
 	TokenEndpoint         string   `yaml:"token_endpoint,omitempty"`
@@ -124,47 +125,48 @@ type Auth struct {
 	TokenType             string   `yaml:"token_type,omitempty"`
 }
 
-// TokenCommand is an external program that prints a bearer token, in the
-// spirit of kubeconfig's exec credential plugins. In YAML it is either a
-// string, which is run through the shell ("sh -c" / "cmd /C"), or a list of
-// program and arguments, which is run directly.
-type TokenCommand struct {
+// Command is an external program that prints a secret, in the spirit of
+// kubeconfig's exec credential plugins. Every secret setting X has a
+// companion X_command (--X-command, CHCLI_X_COMMAND). In YAML a command is
+// either a string, which is run through the shell ("sh -c" / "cmd /C"), or a
+// list of program and arguments, which is run directly.
+type Command struct {
 	Shell string
 	Argv  []string
 }
 
 // IsSet reports whether a command is configured.
-func (c TokenCommand) IsSet() bool { return c.Shell != "" || len(c.Argv) > 0 }
+func (c Command) IsSet() bool { return c.Shell != "" || len(c.Argv) > 0 }
 
 // String renders the command for display.
-func (c TokenCommand) String() string {
+func (c Command) String() string {
 	if c.Shell != "" {
 		return c.Shell
 	}
 	return strings.Join(c.Argv, " ")
 }
 
-func (c *TokenCommand) UnmarshalYAML(value *yaml.Node) error {
+func (c *Command) UnmarshalYAML(value *yaml.Node) error {
 	switch value.Kind {
 	case yaml.ScalarNode:
 		var s string
 		if err := value.Decode(&s); err != nil {
 			return err
 		}
-		*c = TokenCommand{Shell: s}
+		*c = Command{Shell: s}
 		return nil
 	case yaml.SequenceNode:
 		var argv []string
 		if err := value.Decode(&argv); err != nil {
 			return err
 		}
-		*c = TokenCommand{Argv: argv}
+		*c = Command{Argv: argv}
 		return nil
 	}
-	return fmt.Errorf("line %d: token_command must be a string (run through the shell) or a list (program and arguments)", value.Line)
+	return fmt.Errorf("line %d: a command must be a string (run through the shell) or a list (program and arguments)", value.Line)
 }
 
-func (c TokenCommand) MarshalYAML() (any, error) {
+func (c Command) MarshalYAML() (any, error) {
 	if len(c.Argv) > 0 {
 		return c.Argv, nil
 	}
@@ -172,7 +174,7 @@ func (c TokenCommand) MarshalYAML() (any, error) {
 }
 
 // IsZero lets "omitempty" leave an unset command out of config show.
-func (c TokenCommand) IsZero() bool { return !c.IsSet() }
+func (c Command) IsZero() bool { return !c.IsSet() }
 
 // hasPlaintextSecret reports whether the auth block stores a secret in the file.
 func (a Auth) hasPlaintextSecret() bool {

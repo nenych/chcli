@@ -155,8 +155,14 @@ chcli auth login --profile production
 chcli --profile production
 ```
 
-Secrets are never written to the configuration file by chcli, and never
-printed: `config show`, `--debug` and error messages redact them.
+Any secret can also come from a command, like an exec credential plugin in a
+kubeconfig: `password_command`, `token_command` and `client_secret_command`
+in a profile, `--password-command` and friends on the command line,
+`CHCLI_PASSWORD_COMMAND` and friends in the environment. For example
+`client_secret_command: security find-generic-password -s chcli-google -w`
+reads the Google client secret from the macOS Keychain. Secrets are never
+written to the configuration file by chcli, and never printed: `config show`,
+`--debug` and error messages redact them.
 
 ## Documentation
 

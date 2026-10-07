@@ -561,7 +561,7 @@ connections:
 	}
 
 	// Flags and environment take the shell form.
-	r, err := Resolve(&File{}, "", none, source(map[string]string{KeyHost: "localhost", KeyJWTTokenCommand: "cat ~/.token"}))
+	r, err := Resolve(&File{}, "", none, source(map[string]string{KeyHost: "localhost", CommandKey(KeyJWTToken): "cat ~/.token"}))
 	if err != nil || r.Auth.Type != AuthJWT || r.Auth.TokenCommand.Shell != "cat ~/.token" {
 		t.Errorf("flag form = %+v, %v", r.Auth, err)
 	}
@@ -577,5 +577,76 @@ connections:
 		if err == nil {
 			t.Errorf("%s: expected an error", name)
 		}
+	}
+}
+
+// Every secret has a command companion derived by one rule, in the file, on
+// the command line and in the environment.
+func TestSecretCommandsAreUniform(t *testing.T) {
+	for _, key := range SecretKeys {
+		if got, want := CommandKey(key), key+"-command"; got != want {
+			t.Errorf("CommandKey(%q) = %q", key, got)
+		}
+	}
+	if got := EnvName(CommandKey(KeyClientSecret)); got != "CHCLI_OAUTH_CLIENT_SECRET_COMMAND" {
+		t.Errorf("env name = %q", got)
+	}
+
+	f, err := Load(writeConfig(t, `
+connections:
+  pw:
+    host: localhost
+    auth:
+      type: password
+      username: analyst
+      password_command: security find-generic-password -s chcli-pw -w
+  sso:
+    host: localhost
+    auth:
+      type: google
+      client_id: abc.apps.googleusercontent.com
+      client_secret_command: [pass, show, chcli/google]
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	pw, err := Resolve(f, "pw", none, none)
+	if err != nil || pw.Auth.PasswordCommand.Shell != "security find-generic-password -s chcli-pw -w" {
+		t.Errorf("password_command = %+v, %v", pw.Auth.PasswordCommand, err)
+	}
+	sso, err := Resolve(f, "sso", none, none)
+	if err != nil || !reflect.DeepEqual(sso.Auth.ClientSecretCommand.Argv, []string{"pass", "show", "chcli/google"}) {
+		t.Errorf("client_secret_command = %+v, %v", sso.Auth.ClientSecretCommand, err)
+	}
+	// A different auth type drops the commands of the others.
+	if r, err := Resolve(f, "pw", none, source(map[string]string{KeyAuth: "jwt", KeyJWTToken: "t"})); err != nil || r.Auth.PasswordCommand.IsSet() {
+		t.Errorf("password_command survived an auth switch: %+v, %v", r.Auth, err)
+	}
+
+	env := EnvSource(func(name string) (string, bool) {
+		v, ok := map[string]string{"CHCLI_PASSWORD_COMMAND": "cat ~/.pw"}[name]
+		return v, ok
+	})
+	if r, err := Resolve(&File{}, "", env, source(map[string]string{KeyHost: "localhost"})); err != nil || r.Auth.PasswordCommand.Shell != "cat ~/.pw" {
+		t.Errorf("env password command: %+v, %v", r.Auth, err)
+	}
+	r, err := Resolve(&File{}, "", none, source(map[string]string{KeyHost: "localhost", KeyAuth: "oidc", KeyIssuer: "https://i", KeyClientID: "c",
+		CommandKey(KeyClientSecret): "op read op://vault/chcli/secret"}))
+	if err != nil || r.Auth.ClientSecretCommand.Shell != "op read op://vault/chcli/secret" {
+		t.Errorf("flag client secret command: %+v, %v", r.Auth, err)
+	}
+
+	// Value and command for the same secret are mutually exclusive.
+	for name, flags := range map[string]map[string]string{
+		"password":      {KeyHost: "localhost", KeyPassword: "p", CommandKey(KeyPassword): "cmd"},
+		"client secret": {KeyHost: "localhost", KeyAuth: "oidc", KeyIssuer: "https://i", KeyClientID: "c", KeyClientSecret: "s", CommandKey(KeyClientSecret): "cmd"},
+	} {
+		if _, err := Resolve(&File{}, "", none, source(flags)); err == nil || !strings.Contains(err.Error(), "both set") {
+			t.Errorf("%s: error = %v, want a conflict", name, err)
+		}
+	}
+	// The companion of a secret that does not apply to the auth type is reported like the secret itself.
+	if _, err := Resolve(f, "sso", none, source(map[string]string{CommandKey(KeyPassword): "cmd"})); err == nil || !strings.Contains(err.Error(), "--password-command does not apply") {
+		t.Errorf("error = %v", err)
 	}
 }

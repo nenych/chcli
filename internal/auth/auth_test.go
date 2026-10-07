@@ -60,8 +60,9 @@ func TestNewProviderSelection(t *testing.T) {
 		if !ok {
 			t.Fatalf("provider is %T", p)
 		}
+		secret, _ := op.cfg.ClientSecret.Get(context.Background(), false)
 		if op.cfg.Label != "OIDC" || op.cfg.Audience != "clickhouse" || len(op.cfg.AuthParams) != 0 ||
-			op.cfg.CacheKey != "profile:staging" || op.cfg.ClientSecret != "s" {
+			op.cfg.CacheKey != "profile:staging" || secret != "s" {
 			t.Errorf("cfg = %+v", op.cfg)
 		}
 	})

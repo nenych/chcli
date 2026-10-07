@@ -113,25 +113,29 @@ func NewProvider(r *config.Resolved, o Options) (Provider, error) {
 	a := r.Auth
 	switch a.Type {
 	case config.AuthPassword:
-		return &PasswordProvider{Username: a.Username, Password: a.Password.Reveal()}, nil
+		return &PasswordProvider{
+			Username:    a.Username,
+			Password:    NewSecretSource("password", a.Password.Reveal(), a.PasswordCommand, o.Out),
+			interactive: o.Interactive,
+		}, nil
 	case config.AuthJWT:
 		return &JWTProvider{Token: a.Token.Reveal(), Command: a.TokenCommand, Interactive: o.Interactive, Err: o.Out}, nil
 	case config.AuthOIDC:
-		return newOIDCProvider(oidcConfigFrom(r), o), nil
+		return newOIDCProvider(oidcConfigFrom(r, o), o), nil
 	case config.AuthGoogle:
-		return newOIDCProvider(googlePreset(oidcConfigFrom(r)), o), nil
+		return newOIDCProvider(googlePreset(oidcConfigFrom(r, o)), o), nil
 	}
 	return nil, fmt.Errorf("unknown auth type %q", a.Type)
 }
 
-func oidcConfigFrom(r *config.Resolved) OIDCConfig {
+func oidcConfigFrom(r *config.Resolved, o Options) OIDCConfig {
 	a := r.Auth
 	return OIDCConfig{
 		Label:         Label(a.Type),
 		Profile:       r.Profile,
 		CacheKey:      cacheKey(r),
 		ClientID:      a.ClientID,
-		ClientSecret:  a.ClientSecret.Reveal(),
+		ClientSecret:  NewSecretSource("client secret", a.ClientSecret.Reveal(), a.ClientSecretCommand, o.Out),
 		Issuer:        a.Issuer,
 		AuthURL:       a.AuthorizationEndpoint,
 		TokenURL:      a.TokenEndpoint,
@@ -168,11 +172,24 @@ func cacheKey(r *config.Resolved) string {
 // PasswordProvider authenticates with a ClickHouse user name and password.
 type PasswordProvider struct {
 	Username string
-	Password string
+	// Password is the password, given directly or by a command.
+	Password    *SecretSource
+	interactive bool
 }
 
-func (p *PasswordProvider) Authenticate(context.Context) (*Credentials, error) {
-	return &Credentials{Username: p.Username, Password: p.Password, Identity: p.Username}, nil
+func (p *PasswordProvider) Authenticate(ctx context.Context) (*Credentials, error) {
+	return p.authenticate(ctx, p.interactive)
+}
+
+func (p *PasswordProvider) authenticate(ctx context.Context, interactive bool) (*Credentials, error) {
+	password := ""
+	if p.Password != nil {
+		var err error
+		if password, err = p.Password.Get(ctx, interactive); err != nil {
+			return nil, err
+		}
+	}
+	return &Credentials{Username: p.Username, Password: password, Identity: p.Username}, nil
 }
 
 // JWTProvider authenticates with a token supplied by the user: either given
@@ -181,7 +198,7 @@ func (p *PasswordProvider) Authenticate(context.Context) (*Credentials, error) {
 // expired.
 type JWTProvider struct {
 	Token   string
-	Command config.TokenCommand
+	Command config.Command
 	// Interactive lets the command use the terminal (for example to ask the
 	// user to log in to the identity provider).
 	Interactive bool
@@ -211,7 +228,7 @@ func (p *JWTProvider) authenticate(ctx context.Context, interactive bool) (*Cred
 	if c := p.cached; c != nil && (c.Expiry.IsZero() || p.clock().Add(expirySkew).Before(c.Expiry)) {
 		return c, nil
 	}
-	token, err := runTokenCommand(ctx, p.Command, interactive, p.Err)
+	token, err := runSecretCommand(ctx, p.Command, interactive, p.Err)
 	if err != nil {
 		return nil, err
 	}

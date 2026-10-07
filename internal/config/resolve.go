@@ -29,7 +29,6 @@ const (
 	KeyUser               = "user"
 	KeyPassword           = "password"
 	KeyJWTToken           = "jwt-token"
-	KeyJWTTokenCommand    = "jwt-token-command"
 	KeyClientID           = "oauth-client-id"
 	KeyClientSecret       = "oauth-client-secret"
 	KeyIssuer             = "oauth-issuer"
@@ -43,6 +42,13 @@ const (
 	KeyFlow               = "oauth-flow"
 	KeyTokenType          = "oauth-token-type"
 )
+
+// CommandKey returns the key of the command companion of a secret setting:
+// "password" -> "password-command" (--password-command, CHCLI_PASSWORD_COMMAND).
+func CommandKey(secretKey string) string { return secretKey + "-command" }
+
+// SecretKeys lists the settings that hold secrets and so have a command companion.
+var SecretKeys = []string{KeyPassword, KeyJWTToken, KeyClientSecret}
 
 // Source is one layer of overrides (environment or command-line flags).
 type Source struct {
@@ -162,10 +168,10 @@ func checkFlagsFitAuth(r *Resolved, flags Source) error {
 		types []string
 		keys  []string
 	}{
-		{[]string{AuthPassword}, []string{KeyUser, KeyPassword}},
-		{[]string{AuthJWT}, []string{KeyJWTToken, KeyJWTTokenCommand}},
-		{oauth, []string{KeyClientID, KeyClientSecret, KeyIssuer, KeyAuthEndpoint, KeyTokenEndpoint, KeyDeviceEndpoint,
-			KeyAudience, KeyRedirectURI, KeyUsernameClaim, KeyScope, KeyFlow, KeyTokenType}},
+		{[]string{AuthPassword}, []string{KeyUser, KeyPassword, CommandKey(KeyPassword)}},
+		{[]string{AuthJWT}, []string{KeyJWTToken, CommandKey(KeyJWTToken)}},
+		{oauth, []string{KeyClientID, KeyClientSecret, CommandKey(KeyClientSecret), KeyIssuer, KeyAuthEndpoint, KeyTokenEndpoint,
+			KeyDeviceEndpoint, KeyAudience, KeyRedirectURI, KeyUsernameClaim, KeyScope, KeyFlow, KeyTokenType}},
 	} {
 		if slices.Contains(rule.types, r.Auth.Type) {
 			continue
@@ -202,9 +208,13 @@ func applySource(r *Resolved, secure **bool, src Source) error {
 			*dst = v
 		}
 	}
-	secret := func(key string, dst *Secret) {
+	// A secret can be given directly or as a command that prints it.
+	secret := func(key string, dst *Secret, cmd *Command) {
 		if v, ok := src.Lookup(key); ok {
 			*dst = Secret(v)
+		}
+		if v, ok := src.Lookup(CommandKey(key)); ok {
+			*cmd = Command{Shell: v}
 		}
 	}
 	boolean := func(key string) (value, set bool, err error) {
@@ -258,13 +268,10 @@ func applySource(r *Resolved, secure **bool, src Source) error {
 
 	a := &r.Auth
 	str(KeyUser, &a.Username)
-	secret(KeyPassword, &a.Password)
-	secret(KeyJWTToken, &a.Token)
-	if v, ok := src.Lookup(KeyJWTTokenCommand); ok {
-		a.TokenCommand = TokenCommand{Shell: v}
-	}
+	secret(KeyPassword, &a.Password, &a.PasswordCommand)
+	secret(KeyJWTToken, &a.Token, &a.TokenCommand)
 	str(KeyClientID, &a.ClientID)
-	secret(KeyClientSecret, &a.ClientSecret)
+	secret(KeyClientSecret, &a.ClientSecret, &a.ClientSecretCommand)
 	str(KeyIssuer, &a.Issuer)
 	str(KeyAuthEndpoint, &a.AuthorizationEndpoint)
 	str(KeyTokenEndpoint, &a.TokenEndpoint)
@@ -335,14 +342,15 @@ func applyAuthDefaults(a *Auth) {
 
 	switch a.Type {
 	case AuthPassword:
-		*a = Auth{Type: a.Type, Username: a.Username, Password: a.Password}
+		*a = Auth{Type: a.Type, Username: a.Username, Password: a.Password, PasswordCommand: a.PasswordCommand}
 		if a.Username == "" {
 			a.Username = "default"
 		}
 	case AuthJWT:
 		*a = Auth{Type: a.Type, Token: a.Token, TokenCommand: a.TokenCommand}
 	case AuthGoogle, AuthOIDC:
-		a.Username, a.Password, a.Token, a.TokenCommand = "", "", "", TokenCommand{}
+		a.Username, a.Password, a.PasswordCommand = "", "", Command{}
+		a.Token, a.TokenCommand = "", Command{}
 		if a.Type == AuthGoogle && a.Issuer == "" {
 			a.Issuer = GoogleIssuer
 		}
@@ -386,15 +394,25 @@ func (r *Resolved) validate() error {
 	}
 
 	a := r.Auth
+	for _, s := range []struct {
+		name    string
+		value   Secret
+		command Command
+	}{
+		{"password", a.Password, a.PasswordCommand},
+		{"token", a.Token, a.TokenCommand},
+		{"client_secret", a.ClientSecret, a.ClientSecretCommand},
+	} {
+		if s.value != "" && s.command.IsSet() {
+			return fmt.Errorf("auth.%s and auth.%s_command are both set; use one of them", s.name, s.name)
+		}
+	}
 	switch a.Type {
 	case AuthPassword:
 	case AuthJWT:
-		switch {
-		case a.Token == "" && !a.TokenCommand.IsSet():
+		if a.Token == "" && !a.TokenCommand.IsSet() {
 			return fmt.Errorf("auth type %q requires a token (--%s or %s) or a command that prints one (auth.token_command, --%s)",
-				a.Type, KeyJWTToken, EnvName(KeyJWTToken), KeyJWTTokenCommand)
-		case a.Token != "" && a.TokenCommand.IsSet():
-			return fmt.Errorf("auth type %q: set either a token or a token command, not both", a.Type)
+				a.Type, KeyJWTToken, EnvName(KeyJWTToken), CommandKey(KeyJWTToken))
 		}
 	case AuthGoogle, AuthOIDC:
 		if a.ClientID == "" {

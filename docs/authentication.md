@@ -45,10 +45,8 @@ mechanism as `clickhouse-client --jwt`.
 
 #### Getting the token from a command
 
-Instead of a fixed token, a profile can name a command that prints one, the
-way a kubeconfig names `aws eks get-token` for EKS. chcli runs it when it
-connects and runs it again whenever the token it printed is about to expire,
-so a long interactive session keeps working:
+Instead of a fixed token, name a command that prints one, the way a
+kubeconfig names `aws eks get-token` for EKS:
 
 ```yaml
 connections:
@@ -61,24 +59,12 @@ connections:
       token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=1234567890-abc.apps.googleusercontent.com --include-email
 ```
 
-- A **string** is run through the shell (`sh -c` on macOS and Linux,
-  `cmd /C` on Windows), so pipes and `~` work.
-- A **list** is run directly, without a shell:
-  `token_command: [gcloud, auth, print-identity-token, --audiences=...]`.
-- On the command line: `--jwt-token-command "..."`, or
-  `CHCLI_JWT_TOKEN_COMMAND` in the environment. `auth.type: jwt` is implied.
-
-The token is the last non-empty line the command writes to standard output.
-A JSON object is accepted too: the `token`, `access_token`, `id_token` or
-`status.token` field (the last one is the kubeconfig `ExecCredential` shape)
-is used. Standard error is shown to you, and in the interactive shell the
-command may use the terminal, so a tool that needs you to log in first can
-do so. The command has two minutes to finish. Its output is never logged,
-and never appears in an error message.
-
-A token with an `exp` claim is replaced one minute before that time; an
-opaque token is kept for the lifetime of the process. `chcli auth status`
-and `chcli doctor` run the command to report on the token it returns.
+On the command line: `--jwt-token-command "..."` or `CHCLI_JWT_TOKEN_COMMAND`;
+`auth.type: jwt` is implied. chcli runs the command when it connects and runs
+it again whenever the token it printed is about to expire, so a long
+interactive session keeps working. The same mechanism serves passwords and
+OAuth client secrets; the forms a command can take and how its output is read
+are described in [Secrets from commands](configuration.md#secrets-from-commands).
 
 **Tokens and TLS.** A bearer token is a credential for your identity provider,
 not only for this server, so `chcli` does not send one over the network
@@ -109,7 +95,11 @@ clickhouse.example.com/default :)
 ```
 
 The next start reuses the cached session and goes straight to the prompt; no
-browser opens while the token is valid or can be refreshed.
+browser opens while the token is valid or can be refreshed. Google also needs
+the client secret for every token refresh, so keep it available in each
+shell: as `CHCLI_OAUTH_CLIENT_SECRET`, or better, as a
+`client_secret_command` that reads it from your keychain or password manager
+(see [Secrets from commands](configuration.md#secrets-from-commands)).
 
 `--google-oauth` is a shortcut for `--auth google`, which is the generic OIDC
 provider with Google's specifics preset: the issuer, the `openid email profile`

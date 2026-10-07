@@ -32,8 +32,9 @@ type OIDCConfig struct {
 	// CacheKey names the token cache entry.
 	CacheKey string
 
-	ClientID     string
-	ClientSecret string // optional: public clients rely on PKCE alone
+	ClientID string
+	// ClientSecret is optional: public clients rely on PKCE alone.
+	ClientSecret *SecretSource
 	Issuer       string
 	// AuthURL, TokenURL and DeviceURL override the endpoints found through
 	// OIDC discovery. Without an Issuer they are the only source.
@@ -139,7 +140,7 @@ func (p *OIDCProvider) authenticate(ctx context.Context, interactive bool) (*Cre
 	}
 
 	if ts != nil && ts.RefreshToken != "" {
-		refreshed, err := p.refresh(ctx, ts)
+		refreshed, err := p.refresh(ctx, ts, interactive)
 		switch {
 		case err == nil:
 			return p.credentials(refreshed), nil
@@ -172,8 +173,16 @@ func NonInteractive(provider Provider) Provider {
 		return nonInteractive{p}
 	case *JWTProvider:
 		return nonInteractiveJWT{p}
+	case *PasswordProvider:
+		return nonInteractivePassword{p}
 	}
 	return provider
+}
+
+type nonInteractivePassword struct{ p *PasswordProvider }
+
+func (n nonInteractivePassword) Authenticate(ctx context.Context) (*Credentials, error) {
+	return n.p.authenticate(ctx, false)
 }
 
 type nonInteractive struct{ p *OIDCProvider }
@@ -336,13 +345,20 @@ func (p *OIDCProvider) httpContext(ctx context.Context) context.Context {
 	return context.WithValue(ctx, oauth2.HTTPClient, p.httpClient)
 }
 
-func (p *OIDCProvider) oauthConfig(ep oauth2.Endpoint) *oauth2.Config {
+func (p *OIDCProvider) oauthConfig(ctx context.Context, ep oauth2.Endpoint, interactive bool) (*oauth2.Config, error) {
+	secret := ""
+	if p.cfg.ClientSecret != nil {
+		var err error
+		if secret, err = p.cfg.ClientSecret.Get(ctx, interactive); err != nil {
+			return nil, fmt.Errorf("client secret: %w", err)
+		}
+	}
 	return &oauth2.Config{
 		ClientID:     p.cfg.ClientID,
-		ClientSecret: p.cfg.ClientSecret,
+		ClientSecret: secret,
 		Endpoint:     ep,
 		Scopes:       p.cfg.Scopes,
-	}
+	}, nil
 }
 
 // login runs the configured interactive flow and stores the new session.
@@ -351,7 +367,10 @@ func (p *OIDCProvider) login(ctx context.Context) (*TokenSet, error) {
 	if err != nil {
 		return nil, err
 	}
-	conf := p.oauthConfig(ep)
+	conf, err := p.oauthConfig(ctx, ep, true)
+	if err != nil {
+		return nil, err
+	}
 
 	var (
 		tok   *oauth2.Token
@@ -375,13 +394,17 @@ func (p *OIDCProvider) login(ctx context.Context) (*TokenSet, error) {
 }
 
 // refresh trades the refresh token for new tokens and stores them.
-func (p *OIDCProvider) refresh(ctx context.Context, old *TokenSet) (*TokenSet, error) {
+func (p *OIDCProvider) refresh(ctx context.Context, old *TokenSet, interactive bool) (*TokenSet, error) {
 	ep, provider, err := p.endpoints(ctx)
 	if err != nil {
 		return nil, err
 	}
 	slog.Debug("oidc: refreshing tokens")
-	src := p.oauthConfig(ep).TokenSource(p.httpContext(ctx), &oauth2.Token{RefreshToken: old.RefreshToken})
+	conf, err := p.oauthConfig(ctx, ep, interactive)
+	if err != nil {
+		return nil, err
+	}
+	src := conf.TokenSource(p.httpContext(ctx), &oauth2.Token{RefreshToken: old.RefreshToken})
 	tok, err := src.Token()
 	if err != nil {
 		return nil, sanitizeOAuthError(err)

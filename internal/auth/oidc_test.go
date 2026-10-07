@@ -89,7 +89,7 @@ func newHarness(t *testing.T) *harness {
 		Profile:       "production",
 		CacheKey:      "profile:production",
 		ClientID:      h.idp.clientID,
-		ClientSecret:  "client-secret-value",
+		ClientSecret:  NewSecretSource("client secret", "client-secret-value", config.Command{}, nil),
 		Issuer:        h.idp.issuer(),
 		Scopes:        []string{"openid", "email"},
 		UsernameClaim: "email",
@@ -182,7 +182,7 @@ func TestBrowserLogin(t *testing.T) {
 		t.Errorf("missing login message in output:\n%s", out)
 	}
 	for name, secret := range map[string]string{
-		"ID token": stored.IDToken, "refresh token": stored.RefreshToken, "client secret": h.cfg.ClientSecret,
+		"ID token": stored.IDToken, "refresh token": stored.RefreshToken, "client secret": "client-secret-value",
 	} {
 		if strings.Contains(out, secret) {
 			t.Errorf("%s leaked into user-facing output", name)
@@ -661,7 +661,7 @@ func TestIdentityFromAccessTokenWhenNoIDToken(t *testing.T) {
 
 func TestPublicClientWithoutSecret(t *testing.T) {
 	h := newHarness(t)
-	h.cfg.ClientSecret = ""
+	h.cfg.ClientSecret = nil
 	if _, err := h.provider(true).Authenticate(testContext(t)); err != nil {
 		t.Fatalf("a public client must be able to log in with PKCE alone: %v", err)
 	}
