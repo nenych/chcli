@@ -1,0 +1,29 @@
+<!--
+  Token authentication for the Altinity Antalya integration tests.
+
+  Tokens are JWTs signed with a shared HS256 key, so the tests can mint them
+  without an identity provider. Users are not defined in ClickHouse: anyone
+  presenting a valid token becomes the user named by its "email" claim and
+  receives the roles listed under common_roles.
+
+  A production setup would use a jwt_dynamic_jwks, openid, google or entra
+  processor instead; see the README.
+-->
+<clickhouse>
+    <token_processors>
+        <chcli_test>
+            <type>jwt_static_key</type>
+            <algo>HS256</algo>
+            <static_key>chcli-integration-test-signing-key-0123456789</static_key>
+            <username_claim>email</username_claim>
+        </chcli_test>
+    </token_processors>
+    <user_directories>
+        <token>
+            <processor>chcli_test</processor>
+            <common_roles>
+                <chcli_token_reader />
+            </common_roles>
+        </token>
+    </user_directories>
+</clickhouse>
