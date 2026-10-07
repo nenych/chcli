@@ -184,6 +184,7 @@ Run without a query to start the interactive shell, or pass statements with
 	pf.String(config.KeyPassword, "", "password (prefer CHCLI_PASSWORD or --ask-password)")
 	pf.BoolVar(&a.askPassword, "ask-password", false, "prompt for the password")
 	pf.String(config.KeyJWTToken, "", "JWT / bearer token (prefer CHCLI_JWT_TOKEN)")
+	pf.String(config.KeyJWTTokenCommand, "", "shell command that prints the JWT / bearer token, run again when it expires")
 	pf.Bool(config.KeyGoogleOAuth, false, "shortcut for --auth google")
 	pf.String(config.KeyClientID, "", "OAuth client ID")
 	pf.String(config.KeyClientSecret, "", "OAuth client secret (prefer CHCLI_OAUTH_CLIENT_SECRET)")

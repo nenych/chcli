@@ -91,7 +91,7 @@ staging     clickhouse-staging.example.com  OIDC
 
 The complete set of profile keys: `host`, `port`, `database`, `protocol`,
 `secure`, `insecure_skip_verify`, `ca_cert`, and under `auth`: `type`,
-`username`, `password`, `token`, `client_id`, `client_secret`, `issuer`,
+`username`, `password`, `token`, `token_command`, `client_id`, `client_secret`, `issuer`,
 `authorization_endpoint`, `token_endpoint`, `device_endpoint`, `audience`,
 `scopes`, `username_claim`, `redirect_uri`, `flow`, `token_type`. Unknown keys
 are rejected, so typos do not go unnoticed.

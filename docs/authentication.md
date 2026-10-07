@@ -43,6 +43,43 @@ The token is sent the way ClickHouse expects it: in the handshake of the
 native protocol, or as `Authorization: Bearer` over HTTP. This is the same
 mechanism as `clickhouse-client --jwt`.
 
+#### Getting the token from a command
+
+Instead of a fixed token, a profile can name a command that prints one, the
+way a kubeconfig names `aws eks get-token` for EKS. chcli runs it when it
+connects and runs it again whenever the token it printed is about to expire,
+so a long interactive session keeps working:
+
+```yaml
+connections:
+  reporting:
+    host: clickhouse.example.com
+    port: 9440
+    secure: true
+    auth:
+      type: jwt
+      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=1234567890-abc.apps.googleusercontent.com --include-email
+```
+
+- A **string** is run through the shell (`sh -c` on macOS and Linux,
+  `cmd /C` on Windows), so pipes and `~` work.
+- A **list** is run directly, without a shell:
+  `token_command: [gcloud, auth, print-identity-token, --audiences=...]`.
+- On the command line: `--jwt-token-command "..."`, or
+  `CHCLI_JWT_TOKEN_COMMAND` in the environment. `auth.type: jwt` is implied.
+
+The token is the last non-empty line the command writes to standard output.
+A JSON object is accepted too: the `token`, `access_token`, `id_token` or
+`status.token` field (the last one is the kubeconfig `ExecCredential` shape)
+is used. Standard error is shown to you, and in the interactive shell the
+command may use the terminal, so a tool that needs you to log in first can
+do so. The command has two minutes to finish. Its output is never logged,
+and never appears in an error message.
+
+A token with an `exp` claim is replaced one minute before that time; an
+opaque token is kept for the lifetime of the process. `chcli auth status`
+and `chcli doctor` run the command to report on the token it returns.
+
 **Tokens and TLS.** A bearer token is a credential for your identity provider,
 not only for this server, so `chcli` does not send one over the network
 unencrypted by accident. With `jwt`, `oidc` or `google` authentication TLS is

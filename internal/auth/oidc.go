@@ -167,8 +167,11 @@ func (p *OIDCProvider) authenticate(ctx context.Context, interactive bool) (*Cre
 // the user with a browser window nor hold up the foreground while one is
 // open. Cached tokens and refreshes are shared with the original.
 func NonInteractive(provider Provider) Provider {
-	if p, ok := provider.(*OIDCProvider); ok {
+	switch p := provider.(type) {
+	case *OIDCProvider:
 		return nonInteractive{p}
+	case *JWTProvider:
+		return nonInteractiveJWT{p}
 	}
 	return provider
 }
@@ -176,6 +179,12 @@ func NonInteractive(provider Provider) Provider {
 type nonInteractive struct{ p *OIDCProvider }
 
 func (n nonInteractive) Authenticate(ctx context.Context) (*Credentials, error) {
+	return n.p.authenticate(ctx, false)
+}
+
+type nonInteractiveJWT struct{ p *JWTProvider }
+
+func (n nonInteractiveJWT) Authenticate(ctx context.Context) (*Credentials, error) {
 	return n.p.authenticate(ctx, false)
 }
 

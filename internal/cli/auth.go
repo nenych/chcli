@@ -12,6 +12,7 @@ import (
 	"github.com/nenych/chcli/internal/auth"
 	"github.com/nenych/chcli/internal/config"
 	"github.com/nenych/chcli/internal/repl"
+	"github.com/nenych/chcli/internal/session"
 )
 
 func (a *app) authCommand() *cobra.Command {
@@ -155,15 +156,19 @@ func (a *app) authStatus(cmd *cobra.Command) error {
 	return nil
 }
 
-// staticTokenStatus reports on a user-supplied JWT.
+// staticTokenStatus reports on a user-supplied JWT, running the token
+// command if one is configured.
 func (a *app) staticTokenStatus(cmd *cobra.Command, resolved *config.Resolved, line func(key, value string)) error {
+	if resolved.Auth.TokenCommand.IsSet() {
+		line("Token source", "command: "+resolved.Auth.TokenCommand.String())
+	}
 	provider, err := a.newProvider(resolved, false)
 	if err != nil {
 		return err
 	}
 	creds, err := provider.Authenticate(cmd.Context())
 	if err != nil {
-		line("Token status", "expired")
+		line("Token status", session.FormatError(err))
 		return &statusError{ExitAuth}
 	}
 	if creds.Identity != "" {

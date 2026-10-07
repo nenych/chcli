@@ -29,6 +29,7 @@ const (
 	KeyUser               = "user"
 	KeyPassword           = "password"
 	KeyJWTToken           = "jwt-token"
+	KeyJWTTokenCommand    = "jwt-token-command"
 	KeyClientID           = "oauth-client-id"
 	KeyClientSecret       = "oauth-client-secret"
 	KeyIssuer             = "oauth-issuer"
@@ -162,7 +163,7 @@ func checkFlagsFitAuth(r *Resolved, flags Source) error {
 		keys  []string
 	}{
 		{[]string{AuthPassword}, []string{KeyUser, KeyPassword}},
-		{[]string{AuthJWT}, []string{KeyJWTToken}},
+		{[]string{AuthJWT}, []string{KeyJWTToken, KeyJWTTokenCommand}},
 		{oauth, []string{KeyClientID, KeyClientSecret, KeyIssuer, KeyAuthEndpoint, KeyTokenEndpoint, KeyDeviceEndpoint,
 			KeyAudience, KeyRedirectURI, KeyUsernameClaim, KeyScope, KeyFlow, KeyTokenType}},
 	} {
@@ -259,6 +260,9 @@ func applySource(r *Resolved, secure **bool, src Source) error {
 	str(KeyUser, &a.Username)
 	secret(KeyPassword, &a.Password)
 	secret(KeyJWTToken, &a.Token)
+	if v, ok := src.Lookup(KeyJWTTokenCommand); ok {
+		a.TokenCommand = TokenCommand{Shell: v}
+	}
 	str(KeyClientID, &a.ClientID)
 	secret(KeyClientSecret, &a.ClientSecret)
 	str(KeyIssuer, &a.Issuer)
@@ -318,7 +322,7 @@ func applyDefaults(r *Resolved, secure *bool) {
 func applyAuthDefaults(a *Auth) {
 	if a.Type == "" {
 		switch {
-		case a.Token != "":
+		case a.Token != "" || a.TokenCommand.IsSet():
 			a.Type = AuthJWT
 		case a.ClientID != "" && a.Issuer == GoogleIssuer:
 			a.Type = AuthGoogle
@@ -336,9 +340,9 @@ func applyAuthDefaults(a *Auth) {
 			a.Username = "default"
 		}
 	case AuthJWT:
-		*a = Auth{Type: a.Type, Token: a.Token}
+		*a = Auth{Type: a.Type, Token: a.Token, TokenCommand: a.TokenCommand}
 	case AuthGoogle, AuthOIDC:
-		a.Username, a.Password, a.Token = "", "", ""
+		a.Username, a.Password, a.Token, a.TokenCommand = "", "", "", TokenCommand{}
 		if a.Type == AuthGoogle && a.Issuer == "" {
 			a.Issuer = GoogleIssuer
 		}
@@ -385,8 +389,12 @@ func (r *Resolved) validate() error {
 	switch a.Type {
 	case AuthPassword:
 	case AuthJWT:
-		if a.Token == "" {
-			return fmt.Errorf("auth type %q requires a token (--%s or %s)", a.Type, KeyJWTToken, EnvName(KeyJWTToken))
+		switch {
+		case a.Token == "" && !a.TokenCommand.IsSet():
+			return fmt.Errorf("auth type %q requires a token (--%s or %s) or a command that prints one (auth.token_command, --%s)",
+				a.Type, KeyJWTToken, EnvName(KeyJWTToken), KeyJWTTokenCommand)
+		case a.Token != "" && a.TokenCommand.IsSet():
+			return fmt.Errorf("auth type %q: set either a token or a token command, not both", a.Type)
 		}
 	case AuthGoogle, AuthOIDC:
 		if a.ClientID == "" {

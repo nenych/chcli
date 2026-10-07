@@ -145,6 +145,7 @@ func TestUsageErrors(t *testing.T) {
 		{[]string{"-q", "SELECT 1", "--host", "h", "--format", "parquet"}, "unsupported output format"},
 		{[]string{"auth", "login", "--profile", "local"}, "has no login step"},
 		{[]string{"config", "show", "--profile", "local", "--jwt-token", "tok"}, `--jwt-token does not apply to "password" authentication`},
+		{[]string{"config", "show", "--profile", "local", "--jwt-token-command", "cmd"}, `--jwt-token-command does not apply to "password" authentication`},
 		{[]string{"config", "show", "--host", "ch.example.com", "--port", "9000", "--auth", "jwt", "--jwt-token", "tok"}, "without TLS"},
 		{[]string{"auth", "status", "extra"}, "unknown command"},
 	}

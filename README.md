@@ -120,8 +120,11 @@ in [docs/authentication.md](docs/authentication.md).
 # Password
 chcli --host clickhouse.example.com --secure --user chronicle --ask-password
 
-# A token you already have (CI jobs, service accounts)
+# A token you already have (CI jobs, service accounts) ...
 CHCLI_JWT_TOKEN="$(my-token-command)" chcli --host clickhouse.example.com --auth jwt
+
+# ... or a command that prints one, re-run when the token expires
+chcli --host clickhouse.example.com --jwt-token-command "gcloud auth print-identity-token --audiences=..."
 
 # Google login (opens the browser once; the session is cached and refreshed)
 chcli --host clickhouse.example.com --google-oauth \

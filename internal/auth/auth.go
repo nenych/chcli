@@ -13,6 +13,7 @@ import (
 	"io"
 	"net/http"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/nenych/chcli/internal/config"
@@ -114,7 +115,7 @@ func NewProvider(r *config.Resolved, o Options) (Provider, error) {
 	case config.AuthPassword:
 		return &PasswordProvider{Username: a.Username, Password: a.Password.Reveal()}, nil
 	case config.AuthJWT:
-		return &JWTProvider{Token: a.Token.Reveal()}, nil
+		return &JWTProvider{Token: a.Token.Reveal(), Command: a.TokenCommand, Interactive: o.Interactive, Err: o.Out}, nil
 	case config.AuthOIDC:
 		return newOIDCProvider(oidcConfigFrom(r), o), nil
 	case config.AuthGoogle:
@@ -174,26 +175,69 @@ func (p *PasswordProvider) Authenticate(context.Context) (*Credentials, error) {
 	return &Credentials{Username: p.Username, Password: p.Password, Identity: p.Username}, nil
 }
 
-// JWTProvider authenticates with a token supplied by the user.
+// JWTProvider authenticates with a token supplied by the user: either given
+// directly, or printed by an external command (like kubeconfig's exec
+// credential plugins), which is run again whenever the token it returned has
+// expired.
 type JWTProvider struct {
-	Token string
-	now   func() time.Time
+	Token   string
+	Command config.TokenCommand
+	// Interactive lets the command use the terminal (for example to ask the
+	// user to log in to the identity provider).
+	Interactive bool
+	// Err receives the command's standard error.
+	Err io.Writer
+
+	now    func() time.Time
+	mu     sync.Mutex
+	cached *Credentials
 }
 
-func (p *JWTProvider) Authenticate(context.Context) (*Credentials, error) {
-	creds := &Credentials{Token: p.Token}
-	// The token may be opaque; claims are only used for display and for a
-	// friendlier error than the server's when it has already expired.
-	if claims, err := parseJWTClaims(p.Token); err == nil {
+func (p *JWTProvider) Authenticate(ctx context.Context) (*Credentials, error) {
+	return p.authenticate(ctx, p.Interactive)
+}
+
+func (p *JWTProvider) authenticate(ctx context.Context, interactive bool) (*Credentials, error) {
+	if !p.Command.IsSet() {
+		creds, expired := p.credentials(p.Token)
+		if expired {
+			return nil, fmt.Errorf("the JWT token expired at %s; supply a fresh token", creds.Expiry.Local().Format(time.RFC1123))
+		}
+		return creds, nil
+	}
+
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	if c := p.cached; c != nil && (c.Expiry.IsZero() || p.clock().Add(expirySkew).Before(c.Expiry)) {
+		return c, nil
+	}
+	token, err := runTokenCommand(ctx, p.Command, interactive, p.Err)
+	if err != nil {
+		return nil, err
+	}
+	creds, expired := p.credentials(token)
+	if expired {
+		return nil, fmt.Errorf("token command %q printed a token that expired at %s", p.Command, creds.Expiry.Local().Format(time.RFC1123))
+	}
+	p.cached = creds
+	return creds, nil
+}
+
+func (p *JWTProvider) clock() time.Time {
+	if p.now != nil {
+		return p.now()
+	}
+	return time.Now()
+}
+
+// credentials wraps a token, reading its claims for display and to notice an
+// expired token before the server does. The token may be opaque, in which
+// case nothing is known about it.
+func (p *JWTProvider) credentials(token string) (creds *Credentials, expired bool) {
+	creds = &Credentials{Token: token}
+	if claims, err := parseJWTClaims(token); err == nil {
 		creds.Identity = claimString(claims, "email", "preferred_username", "sub")
 		creds.Expiry = claimTime(claims, "exp")
 	}
-	now := time.Now
-	if p.now != nil {
-		now = p.now
-	}
-	if !creds.Expiry.IsZero() && !now().Before(creds.Expiry) {
-		return nil, fmt.Errorf("the JWT token expired at %s; supply a fresh token", creds.Expiry.Local().Format(time.RFC1123))
-	}
-	return creds, nil
+	return creds, !creds.Expiry.IsZero() && !p.clock().Before(creds.Expiry)
 }

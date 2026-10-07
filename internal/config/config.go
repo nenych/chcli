@@ -13,6 +13,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sort"
+	"strings"
 
 	"go.yaml.in/yaml/v3"
 )
@@ -103,8 +104,10 @@ type Auth struct {
 	Username string `yaml:"username,omitempty"`
 	Password Secret `yaml:"password,omitempty"`
 
-	// Static JWT / bearer token authentication.
-	Token Secret `yaml:"token,omitempty"`
+	// Static JWT / bearer token authentication: either the token itself or
+	// a command that prints one.
+	Token        Secret       `yaml:"token,omitempty"`
+	TokenCommand TokenCommand `yaml:"token_command,omitempty"`
 
 	// OAuth 2.0 / OpenID Connect (types "oidc" and "google").
 	ClientID              string   `yaml:"client_id,omitempty"`
@@ -120,6 +123,56 @@ type Auth struct {
 	Flow                  string   `yaml:"flow,omitempty"`
 	TokenType             string   `yaml:"token_type,omitempty"`
 }
+
+// TokenCommand is an external program that prints a bearer token, in the
+// spirit of kubeconfig's exec credential plugins. In YAML it is either a
+// string, which is run through the shell ("sh -c" / "cmd /C"), or a list of
+// program and arguments, which is run directly.
+type TokenCommand struct {
+	Shell string
+	Argv  []string
+}
+
+// IsSet reports whether a command is configured.
+func (c TokenCommand) IsSet() bool { return c.Shell != "" || len(c.Argv) > 0 }
+
+// String renders the command for display.
+func (c TokenCommand) String() string {
+	if c.Shell != "" {
+		return c.Shell
+	}
+	return strings.Join(c.Argv, " ")
+}
+
+func (c *TokenCommand) UnmarshalYAML(value *yaml.Node) error {
+	switch value.Kind {
+	case yaml.ScalarNode:
+		var s string
+		if err := value.Decode(&s); err != nil {
+			return err
+		}
+		*c = TokenCommand{Shell: s}
+		return nil
+	case yaml.SequenceNode:
+		var argv []string
+		if err := value.Decode(&argv); err != nil {
+			return err
+		}
+		*c = TokenCommand{Argv: argv}
+		return nil
+	}
+	return fmt.Errorf("line %d: token_command must be a string (run through the shell) or a list (program and arguments)", value.Line)
+}
+
+func (c TokenCommand) MarshalYAML() (any, error) {
+	if len(c.Argv) > 0 {
+		return c.Argv, nil
+	}
+	return c.Shell, nil
+}
+
+// IsZero lets "omitempty" leave an unset command out of config show.
+func (c TokenCommand) IsZero() bool { return !c.IsSet() }
 
 // hasPlaintextSecret reports whether the auth block stores a secret in the file.
 func (a Auth) hasPlaintextSecret() bool {

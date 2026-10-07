@@ -7,6 +7,7 @@ import (
 	"os"
 	"path/filepath"
 	"reflect"
+	"regexp"
 	"runtime"
 	"strings"
 	"testing"
@@ -513,5 +514,68 @@ func TestDefaultPathHonoursEnvironment(t *testing.T) {
 	t.Setenv("XDG_STATE_HOME", "")
 	if got, want := StateDir(), "/home/u/.local/state/chcli"; got != want {
 		t.Errorf("StateDir = %q, want %q", got, want)
+	}
+}
+
+func TestTokenCommandForms(t *testing.T) {
+	f, err := Load(writeConfig(t, `
+connections:
+  shell:
+    host: localhost
+    auth:
+      type: jwt
+      token_command: gcloud auth print-identity-token --audiences=abc
+  argv:
+    host: localhost
+    auth:
+      type: jwt
+      token_command: [gcloud, auth, print-identity-token, --audiences=abc]
+  inferred:
+    host: localhost
+    auth:
+      token_command: ./get-token
+`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	shell, err := Resolve(f, "shell", none, none)
+	if err != nil || shell.Auth.TokenCommand.Shell != "gcloud auth print-identity-token --audiences=abc" || len(shell.Auth.TokenCommand.Argv) != 0 {
+		t.Errorf("shell form = %+v, %v", shell.Auth.TokenCommand, err)
+	}
+	argv, err := Resolve(f, "argv", none, none)
+	if err != nil || !reflect.DeepEqual(argv.Auth.TokenCommand.Argv, []string{"gcloud", "auth", "print-identity-token", "--audiences=abc"}) || argv.Auth.TokenCommand.Shell != "" {
+		t.Errorf("argv form = %+v, %v", argv.Auth.TokenCommand, err)
+	}
+	inferred, err := Resolve(f, "inferred", none, none)
+	if err != nil || inferred.Auth.Type != AuthJWT {
+		t.Errorf("a token command alone implies jwt: %+v, %v", inferred.Auth, err)
+	}
+	// config show renders the command (it is not a secret) in the form it was given.
+	out, err := yaml.Marshal(argv)
+	if err != nil || !regexp.MustCompile(`token_command:\n\s+- gcloud\n\s+- auth\n`).Match(out) {
+		t.Errorf("yaml = %s, %v", out, err)
+	}
+	out, _ = yaml.Marshal(shell)
+	if !strings.Contains(string(out), "token_command: gcloud auth print-identity-token --audiences=abc") {
+		t.Errorf("yaml = %s", out)
+	}
+
+	// Flags and environment take the shell form.
+	r, err := Resolve(&File{}, "", none, source(map[string]string{KeyHost: "localhost", KeyJWTTokenCommand: "cat ~/.token"}))
+	if err != nil || r.Auth.Type != AuthJWT || r.Auth.TokenCommand.Shell != "cat ~/.token" {
+		t.Errorf("flag form = %+v, %v", r.Auth, err)
+	}
+
+	for name, cfg := range map[string]string{
+		"both token and command": "connections:\n  x:\n    host: localhost\n    auth:\n      type: jwt\n      token: t\n      token_command: cmd\n",
+		"wrong yaml type":        "connections:\n  x:\n    host: localhost\n    auth:\n      type: jwt\n      token_command: {program: x}\n",
+	} {
+		f, err := Load(writeConfig(t, cfg))
+		if err == nil {
+			_, err = Resolve(f, "x", none, none)
+		}
+		if err == nil {
+			t.Errorf("%s: expected an error", name)
+		}
 	}
 }
