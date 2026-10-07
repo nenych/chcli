@@ -6,6 +6,8 @@ All notable changes to chcli are documented here. The format follows
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-07
+
 ### Added
 
 - Secrets from commands, like kubeconfig's exec credential plugins: every
@@ -15,7 +17,15 @@ All notable changes to chcli are documented here. The format follows
   and a `_COMMAND` environment variable. A command is a shell string or a
   list of program and arguments; its output is read as plain text or JSON.
   A bearer token is fetched again whenever the one in use is about to
-  expire, so long sessions keep working.
+  expire, so long sessions keep working. Recipes for the common secret
+  stores and identity providers are in `docs/secrets.md`.
+- `chcli auth status` shows the issuer and audience of a JWT, the claims a
+  server checks before accepting it.
+
+### Changed
+
+- The README is a short front door; the detailed documentation moved to
+  `docs/`.
 
 ## [0.1.0] - 2026-10-07
 
@@ -50,5 +60,6 @@ First release.
 - Shell completion for bash, zsh, fish and PowerShell, including profile names.
 - Verified against Altinity Antalya token authentication (native and HTTP).
 
-[Unreleased]: https://github.com/nenych/chcli/compare/v0.1.0...HEAD
+[Unreleased]: https://github.com/nenych/chcli/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/nenych/chcli/compare/v0.1.0...v0.2.0
 [0.1.0]: https://github.com/nenych/chcli/releases/tag/v0.1.0

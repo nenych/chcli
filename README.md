@@ -36,7 +36,8 @@ production/default :) SELECT * FROM chronicle.events e WHERE e.ev
   views, dictionaries, columns, table aliases, functions, table functions,
   data types, engines, formats, settings and keywords.
 - **Connection profiles** with a strict precedence: flags, then environment,
-  then the profile, then defaults.
+  then the profile, then defaults. Secrets come from commands (keychain,
+  1Password, Vault, `gcloud`, ...) rather than from the file.
 - **Authentication**: password, static JWT / bearer token, generic OIDC, and
   Google as a preset on top of the generic OIDC implementation. Browser login
   with PKCE or device flow, token caching in the OS keychain, automatic
@@ -113,62 +114,84 @@ chcli --host localhost -q "SELECT count() FROM system.tables"
 
 ## Connecting
 
-One example per authentication type; the details, including every flag, are
-in [docs/authentication.md](docs/authentication.md).
+One example per authentication type; every flag is described in
+[docs/authentication.md](docs/authentication.md).
 
 ```sh
 # Password
 chcli --host clickhouse.example.com --secure --user chronicle --ask-password
 
-# A token you already have (CI jobs, service accounts) ...
+# A token you already have (CI jobs, service accounts)
 CHCLI_JWT_TOKEN="$(my-token-command)" chcli --host clickhouse.example.com --auth jwt
 
-# ... or a command that prints one, re-run when the token expires
-chcli --host clickhouse.example.com --jwt-token-command "gcloud auth print-identity-token --audiences=..."
-
-# Google login (opens the browser once; the session is cached and refreshed)
+# Google login: opens the browser once, then reuses and refreshes the session
 chcli --host clickhouse.example.com --google-oauth \
-  --oauth-client-id 1234567890-abc.apps.googleusercontent.com
+  --oauth-client-id 1234567890-xxxx.apps.googleusercontent.com
 
 # Any OpenID Connect provider
 chcli --host clickhouse.example.com --auth oidc \
   --oauth-issuer https://auth.example.com/realms/analytics --oauth-client-id clickhouse-cli
 ```
 
-Put the same settings in a profile and select it with `--profile`:
+Profiles keep this in `~/.config/chcli/config.yaml` and are selected with
+`--profile`. Secrets do not go into the file: a `*_command` names a command
+that prints them, like an exec credential plugin in a kubeconfig.
 
 ```yaml
-# ~/.config/chcli/config.yaml
 connections:
-  production:
+  production:                     # you, through Google login
     host: clickhouse.example.com
     port: 9440
     secure: true
     auth:
       type: google
-      client_id: 1234567890-abc.apps.googleusercontent.com
+      client_id: 1234567890-xxxx.apps.googleusercontent.com
+      client_secret_command: security find-generic-password -s chcli-google -w   # macOS Keychain
+
+  reporting:                      # a Google service account, no browser
+    host: clickhouse.example.com
+    port: 9440
+    secure: true
+    auth:
+      type: jwt
+      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=1234567890-xxxx.apps.googleusercontent.com --include-email
+
+  warehouse:                      # a classic password, from 1Password
+    host: warehouse.example.com
+    port: 9440
+    secure: true
+    auth:
+      type: password
+      username: analyst
+      password_command: [op, read, "op://Engineering/ClickHouse warehouse/password"]
 ```
 
-```sh
-export CHCLI_OAUTH_CLIENT_SECRET='GOCSPX-...'   # secrets stay out of the file
-chcli auth login --profile production
-chcli --profile production
+```console
+$ chcli auth login --profile production
+Opening browser for Google authentication...
+Authenticated as user@example.com
+
+$ chcli --profile production
+Authenticated as user@example.com
+Connected to clickhouse.example.com (ClickHouse 26.6.4.20001.altinityantalya)
+
+production/default :)
+
+$ chcli --profile reporting -q "SELECT currentUser(), currentRoles()"
+reporting@my-project.iam.gserviceaccount.com	['analyst']
 ```
 
-Any secret can also come from a command, like an exec credential plugin in a
-kubeconfig: `password_command`, `token_command` and `client_secret_command`
-in a profile, `--password-command` and friends on the command line,
-`CHCLI_PASSWORD_COMMAND` and friends in the environment. For example
-`client_secret_command: security find-generic-password -s chcli-google -w`
-reads the Google client secret from the macOS Keychain. Secrets are never
-written to the configuration file by chcli, and never printed: `config show`,
-`--debug` and error messages redact them.
+A token command is run again whenever the token it printed is about to
+expire, so long sessions keep working. Secrets are never printed: `config show`,
+`--debug` and error messages redact them. Recipes for Vault, Bitwarden, `pass`,
+cloud secret managers, Entra ID and more are in [docs/secrets.md](docs/secrets.md).
 
 ## Documentation
 
 | Document | Contents |
 |---|---|
 | [docs/authentication.md](docs/authentication.md) | password, JWT, Google, generic OIDC; login sessions; the Google Cloud setup guide; Altinity Antalya examples |
+| [docs/secrets.md](docs/secrets.md) | getting passwords, tokens and client secrets from commands; recipes per secret store |
 | [docs/configuration.md](docs/configuration.md) | profiles, configuration precedence, environment variables |
 | [docs/shell.md](docs/shell.md) | keys, autocomplete, meta commands, output formats, history |
 | [docs/scripting.md](docs/scripting.md) | `--query`, `--file`, stdin, output formats, exit codes, OAuth in CI |

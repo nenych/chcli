@@ -35,7 +35,7 @@
 - **Secrets on the command line** are visible to other users of the machine
   through the process list. Use `--ask-password`, the `CHCLI_*` environment
   variables, or a `*_command` that reads the secret from a keychain or
-  password manager (see [Secrets from commands](configuration.md#secrets-from-commands)).
+  password manager (see [Secrets from commands](secrets.md)).
   Commands run with your privileges from your configuration file; keep that
   file writable by you alone.
 - **Configuration file.** Storing secrets in it is supported but discouraged;

@@ -56,17 +56,19 @@ connections:
     secure: true
     auth:
       type: jwt
-      # --audiences must be the OAuth client ID the server was configured with
-      # (its expected_audience), and --include-email is what puts the e-mail claim in.
-      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=<your client ID>.apps.googleusercontent.com --include-email
+      # The audience must be the OAuth client ID the server expects (its
+      # expected_audience); --include-email puts the e-mail claim in.
+      token_command: gcloud auth print-identity-token --impersonate-service-account=reporting@my-project.iam.gserviceaccount.com --audiences=1234567890-xxxx.apps.googleusercontent.com --include-email
 ```
 
 On the command line: `--jwt-token-command "..."` or `CHCLI_JWT_TOKEN_COMMAND`;
-`auth.type: jwt` is implied. chcli runs the command when it connects and runs
-it again whenever the token it printed is about to expire, so a long
-interactive session keeps working. The same mechanism serves passwords and
-OAuth client secrets; the forms a command can take and how its output is read
-are described in [Secrets from commands](configuration.md#secrets-from-commands).
+`auth.type: jwt` is implied. chcli runs the command when it connects and
+again whenever the token it printed is about to expire, so a long interactive
+session keeps working. `chcli auth status` shows the user, issuer, audience
+and expiry of the token the command returns, which is the first thing to
+check when a server rejects it. The same mechanism serves passwords and OAuth
+client secrets; see [Secrets from commands](secrets.md) for the details and
+recipes for Vault, 1Password, cloud secret managers, Entra ID and more.
 
 **Tokens and TLS.** A bearer token is a credential for your identity provider,
 not only for this server, so `chcli` does not send one over the network
@@ -81,7 +83,7 @@ you combine a token with a plaintext port (9000, 8123) on a remote host,
 ```sh
 chcli --host clickhouse.example.com --secure \
   --google-oauth \
-  --oauth-client-id 1234567890-abc.apps.googleusercontent.com \
+  --oauth-client-id 1234567890-xxxx.apps.googleusercontent.com \
   --oauth-client-secret "$GOOGLE_CLIENT_SECRET"
 ```
 
@@ -98,10 +100,22 @@ clickhouse.example.com/default :)
 
 The next start reuses the cached session and goes straight to the prompt; no
 browser opens while the token is valid or can be refreshed. Google also needs
-the client secret for every token refresh, so keep it available in each
-shell: as `CHCLI_OAUTH_CLIENT_SECRET`, or better, as a
-`client_secret_command` that reads it from your keychain or password manager
-(see [Secrets from commands](configuration.md#secrets-from-commands)).
+the client secret for every token refresh, so keep it available: as
+`CHCLI_OAUTH_CLIENT_SECRET` in each shell, or better, as a
+`client_secret_command` in the profile that reads it from your keychain or
+password manager (see [Secrets from commands](secrets.md)):
+
+```yaml
+connections:
+  production:
+    host: clickhouse.example.com
+    port: 9440
+    secure: true
+    auth:
+      type: google
+      client_id: 1234567890-xxxx.apps.googleusercontent.com
+      client_secret_command: security find-generic-password -s chcli-google -w
+```
 
 `--google-oauth` is a shortcut for `--auth google`, which is the generic OIDC
 provider with Google's specifics preset: the issuer, the `openid email profile`
@@ -250,6 +264,21 @@ antalya/default :) SELECT currentUser(), currentRoles();
 from the token's group claim (`groups_claim`, `roles_filter`,
 `roles_transform`, `roles_mapping`); see Altinity's documentation.
 
+For unattended use, a service account's token goes through a `token_command`
+instead of a browser login, for example a Keycloak client-credentials grant
+(see [Secrets from commands](secrets.md#recipes)):
+
+```yaml
+connections:
+  antalya-batch:
+    host: clickhouse.example.com
+    port: 9440
+    secure: true
+    auth:
+      type: jwt
+      token_command: curl -fsS --data @"$HOME/.config/chcli/keycloak-batch" https://auth.example.com/realms/analytics/protocol/openid-connect/token
+```
+
 ### Google with Antalya
 
 Google access tokens are opaque rather than JWTs. Antalya has a processor for
@@ -262,7 +291,7 @@ them that asks Google who the token belongs to:
             <type>google</type>
             <username_claim>email</username_claim>
             <!-- Only accept tokens issued to your OAuth client. -->
-            <expected_audience>1234567890-abc.apps.googleusercontent.com</expected_audience>
+            <expected_audience>1234567890-xxxx.apps.googleusercontent.com</expected_audience>
         </google>
     </token_processors>
     <user_directories>
@@ -277,7 +306,12 @@ them that asks Google who the token belongs to:
 ```
 
 This pairs with `chcli`'s default for `--auth google`, which presents the
-access token. If your server instead validates Google **ID tokens** (a
+access token. A Google **service account** is used the same way as any JWT
+(`type: jwt` with a `token_command`): `gcloud auth print-identity-token
+--impersonate-service-account=... --audiences=<client ID> --include-email`
+mints an ID token for the server's `jwt_dynamic_jwks` processor, with the
+account's e-mail as the user name. The audience must be the client ID the
+server expects; `chcli auth status` shows what the command produced. If your server instead validates Google **ID tokens** (a
 `jwt_dynamic_jwks` processor with
 `jwks_uri` `https://www.googleapis.com/oauth2/v3/certs`, `expected_issuer`
 `https://accounts.google.com` and your client ID as `expected_audience`), set
@@ -341,7 +375,7 @@ Good to know:
        secure: true
        auth:
          type: google
-         client_id: 1234567890-abc.apps.googleusercontent.com
+         client_id: 1234567890-xxxx.apps.googleusercontent.com
    ```
 
    ```sh
