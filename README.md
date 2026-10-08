@@ -14,14 +14,14 @@ Authenticated as user@example.com
 Connected to clickhouse.example.com (ClickHouse 26.3.13.20001.altinityantalya)
 
 production/default :) SELECT count(*)
-..................... FROM chronicle.events
+..................... FROM kubernetes.events
 ..................... WHERE created_at > now() - INTERVAL 1 HOUR;
 ┌─count()─┐
 │ 1382991 │
 └─────────┘
 1 row in set. 0.087 sec. Processed 1.38 million rows, 11.06 MB.
 
-production/default :) SELECT * FROM chronicle.events e WHERE e.ev
+production/default :) SELECT * FROM kubernetes.events e WHERE e.ev
                                                              ┌──────────────────────────────┐
                                                              │ event_id    column  UInt64   │
                                                              │ event_type  column  String   │
